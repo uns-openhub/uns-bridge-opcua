@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "connections": [
+    {
+      "id": "plc-a",
+      "start": true,
+      "config": {
+        "endpointUrl": "opc.tcp://localhost:4840",
+        "securityMode": "None",
+        "monitoring": {
+          "intervalMs": 1000,
+          "queueSize": 10,
+          "discardOldest": true,
+          "timestampsToReturn": "both"
+        }
+      },
+      "mappings": [
+        {
+          "id": "temperature",
+          "config": {
+            "nodeId": "ns=3;s=Machine.Temperature",
+            "topic": "enterprise/site/area/line/",
+            "asset": "line-3-furnace",
+            "objectType": "energy-resource",
+            "objectId": "main-bus",
+            "attribute": "current",
+            "expectedIntervalMs": 1000,
+            "mode": "polling",
+            "intervalMs": 1000
+          }
+        },
+        {
+          "id": "furnace-zone-temperature",
+          "config": {
+            "nodeId": "ns=3;s=Machine.Zone1.Temperature",
+            "topic": "enterprise/site/area/line/line-3-furnace/",
+            "asset": "zone-1",
+            "objectType": "equipment",
+            "objectId": "main",
+            "attribute": "temperature",
+            "dataGroup": "opcua-plc-a",
+            "expectedIntervalMs": 1000,
+            "mode": "polling",
+            "intervalMs": 1000
+          }
+        }
+      ]
+    }
+  ]
+}
