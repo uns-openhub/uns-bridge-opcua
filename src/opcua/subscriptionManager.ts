@@ -1,3 +1,4 @@
+import { readEngineeringUnits } from "./engineering-units.js";
 import { getLogger } from "@uns-kit/core";
 import {
   AttributeIds,
@@ -21,6 +22,7 @@ export type OpcuaMappingConfig = {
   objectId: string;
   attribute: string;
   attributeDescription?: string;
+  uom?: string;
   dataGroup?: string;
   validityMode?: "interval" | "lifecycle";
   lifecycleEndValue?: string;
@@ -36,12 +38,14 @@ export type OpcuaValueEvent = {
   value: unknown;
   timestamp: string;
   quality: string;
+  uom?: string;
   connectionId: string;
   nodeId: string;
 };
 
 type MappingEntry = {
   config: OpcuaMappingConfig;
+  sourceUnit?: string | undefined;
   onValue: (event: OpcuaValueEvent) => Promise<void>;
   monitoredItem: ClientMonitoredItem | undefined;
   pollingTimer: NodeJS.Timeout | undefined;
@@ -158,6 +162,10 @@ export class SubscriptionManager {
   }
 
   private async activateMapping(mappingId: string, entry: MappingEntry): Promise<void> {
+    entry.sourceUnit = undefined;
+    if (this.session && !entry.config.uom) {
+      entry.sourceUnit = (await readEngineeringUnits(this.session, [entry.config.nodeId])).get(entry.config.nodeId)?.displayName;
+    }
     if (entry.config.mode === "polling") {
       this.startPolling(mappingId, entry);
       return;
@@ -201,6 +209,7 @@ export class SubscriptionManager {
         value: dataValue.value.value,
         timestamp,
         quality,
+        ...(entry.sourceUnit ? { uom: entry.sourceUnit } : {}),
         connectionId: this.connectionId,
         nodeId: entry.config.nodeId,
       });
@@ -236,6 +245,7 @@ export class SubscriptionManager {
         value: dataValue.value.value,
         timestamp,
         quality,
+        ...(entry.sourceUnit ? { uom: entry.sourceUnit } : {}),
         connectionId: this.connectionId,
         nodeId: entry.config.nodeId,
       });
@@ -271,6 +281,7 @@ export class SubscriptionManager {
           value: dataValue.value.value,
           timestamp,
           quality,
+          ...(entry.sourceUnit ? { uom: entry.sourceUnit } : {}),
           connectionId: this.connectionId,
           nodeId: entry.config.nodeId,
         });

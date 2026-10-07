@@ -1,4 +1,5 @@
 import { MessageSecurityMode, OPCUAClient, SecurityPolicy, type ClientSession, type OPCUAClientOptions } from 'node-opcua';
+import { resolveRuntimeIdentity, redactRuntimeIdentityError } from "../runtime/local-secret-references.js";
 import type { OpcuaConnectionConfig } from './opcuaClientWrapper.js';
 
 const toSecurityMode = (value?: 'None' | 'Sign' | 'SignAndEncrypt'): MessageSecurityMode => {
@@ -40,38 +41,16 @@ function createClientOptions(connectionId: string, config: OpcuaConnectionConfig
   };
 }
 
-function resolveUserIdentity(
-  connectionId: string,
-  config: OpcuaConnectionConfig,
-):
-  | undefined
-  | {
-      type: 1;
-      userName: string;
-      password: string;
-    } {
-  if (!config.userIdentity || config.userIdentity.type === 'anonymous') {
-    return undefined;
-  }
-
-  if (!config.userIdentity.userName || !config.userIdentity.password) {
-    throw new Error(`Connection '${connectionId}' requires both userName and password for username authentication`);
-  }
-
-  return {
-    type: 1,
-    userName: config.userIdentity.userName,
-    password: config.userIdentity.password,
-  };
-}
-
 export async function checkOpcuaSourceConnection(connectionId: string, config: OpcuaConnectionConfig): Promise<void> {
+  const identity = resolveRuntimeIdentity(config.userIdentity);
   const client = OPCUAClient.create(createClientOptions(connectionId, config));
   let session: ClientSession | undefined;
 
   try {
     await client.connect(config.endpointUrl);
-    session = await client.createSession(resolveUserIdentity(connectionId, config));
+    session = await client.createSession(identity);
+  } catch (error) {
+    throw new Error(redactRuntimeIdentityError(error, config.userIdentity));
   } finally {
     if (session) {
       await session.close().catch(() => undefined);
