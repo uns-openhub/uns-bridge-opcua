@@ -71,7 +71,18 @@ Swagger is served by `@uns-kit/api` for the registered endpoints. After startup,
 
 ## Shared Bridge-Core API
 
-The protocol-agnostic management API now lives in local `bridge-core` and is intended to become a reusable package later, for example `@uns-kit/bridge-core`.
+The protocol-agnostic management API is provided by the separately published
+`@uns-kit/bridge-core` package. This bridge requires `@uns-kit/bridge-core`
+3.0.1 or newer and `@uns-kit/core` / `@uns-kit/api` 3.0.21 or newer.
+
+Its managed publisher reconciles observed UNS topic metadata against the saved
+connection and mapping targets. Stopping a connection keeps its configured
+targets; retargeting or deleting a mapping removes obsolete publisher metadata,
+while targets shared by other mappings remain. Accepted publishes drain before
+retirement with a bounded wait, and late publishes to removed targets are
+rejected. A drain timeout fails the operation rather than reporting a completed
+retirement. Reconciliation does not create unseen target observations or delete
+UNS nodes, retained values, or archived history.
 
 These endpoints should stay aligned across bridges such as `uns-bridge-opcua`, `uns-bridge-modbus`, and `uns-bridge-mqtt`:
 
@@ -431,3 +442,134 @@ suite.
 ## License
 
 [MIT](./LICENSE) © Aljoša Vister.
+
+## Source health observations
+
+The bridge reports the state of its actual started OPC UA sessions every five
+seconds through retained service metadata. It does not open separate periodic
+probe sessions. Stopped connections do not degrade source health. Runtime status
+reads and metadata publication have bounded waits; newer controllers expire these
+observations after 20 seconds rather than confirming an old healthy result.
+Connection status details include the last received value time, last good value
+time and last observed quality. These are observations across that connection's
+mappings, not a promise that every mapped signal is fresh.
+
+## Engineering units
+
+Browse returns a readable built-in data type and optional `engineeringUnits` from
+the source's OPC UA EngineeringUnits property. The runtime reads this optional
+property on the existing session when activating/restoring a mapping and includes
+its display name as `data.uom` on published UNS values. Missing, bad or slow unit
+metadata does not prevent monitoring. Metadata is not read on every data sample.
+
+An optional mapping `uom` overrides the unit label. Blank/omitted uses source
+metadata; numeric values are never converted. Unknown units stay absent rather
+than being guessed from the signal name. Schema-version-1 snapshots remain valid.
+Unit/type metadata is source observation and does not overwrite tenant schema.
+
+### Portable runtime configuration
+
+`runtime-state.manifest.json` declares the runtime-owned JSON configuration file
+and its source-generated JSON schema. Controller cold updates copy this file
+only after the source stops; differing target configuration blocks the move.
+The file stays on disk, separately from controller-local startup credentials.
+`pnpm build` regenerates the runtime schema from `runtimeConfigSnapshotSchema`.
+Default `runtime-config.json` is supported; an external path selected through
+`UNS_BRIDGE_RUNTIME_CONFIG_PATH` requires separate operator-managed transfer.
+Cross-controller automatic transfer supports anonymous remote endpoints and
+username/password sources whose two credentials use local environment references.
+Inline credentials, loopback addresses and local certificate files are blocked
+before stopping the source. Runtime changes are written atomically.
+
+### Local runtime credential references
+
+Username-authenticated sources can use node-local environment references in
+`runtime-config.json` instead of inline credentials:
+
+```json
+{
+  "userIdentity": {
+    "type": "username",
+    "userName": { "provider": "env", "key": "UNS_RUNTIME_SECRET_PLC_USER" },
+    "password": { "provider": "env", "key": "UNS_RUNTIME_SECRET_PLC_PASSWORD" }
+  }
+}
+```
+
+Provision those variables separately on every controller that will run the
+connection. References must have exactly `provider` and `key`, with an
+`UNS_RUNTIME_SECRET_*` key; values and defaults are not part of the reference.
+The runtime resolves them only when opening an OPC UA session. Saved snapshots,
+configuration API responses and shared configuration retain the reference objects.
+Missing variables block a started configuration before runtime mutation; check
+and browse also fail without falling back to anonymous authentication. Stopped
+connections can be authored before provisioning in a running bridge. Controller-managed
+process starts require every declared reference, including stopped connections.
+Existing inline credentials still
+work locally but are not eligible for cross-controller configuration transfer.
+
+Rotation changes the local variable, then requires a process restart with the new
+environment. It does not change the shared runtime configuration revision. A
+nonempty binding proves availability only; check the OPC UA connection to prove
+that the server accepts it. Use a trusted network and the appropriate OPC UA
+security policy for the server. This reference feature does not change transport
+security or provision/distribute secrets. The initial provider is `env` only.
+
+
+### Development candidate: reviewed connection recipes
+
+The controller's OPC UA workspace can export/import portable connection recipes
+(`uns-openhub/opcua-connection`, version `1`). Device mapping recipes are a
+separate artifact; connection recipes contain no UNS destinations or mappings.
+The source endpoint, connection ID/name, start flag and inline credentials are
+excluded. Supported security, session, subscription and monitoring options are
+preserved, including absent defaults and explicit zero/false values. Import
+asks for a new local name, an `opc.tcp://` endpoint and, for username auth, strict
+`UNS_RUNTIME_SECRET_*` environment reference keys. Values may come from the
+existing node-local environment/Infisical bootstrap; recipes never contain them.
+
+Two additive management endpoints support this flow under the existing protected
+`/api/system/bridge/opcua/runtime/service/` namespace:
+
+- `POST connections/preview-add`: `{ "connection": { "id": "plc-b", "config": { "endpointUrl": "opc.tcp://plc-b.local:4840" } } }`.
+  Returns `{ "id", "revision" }`. No source connection, secret resolution or
+  snapshot write occurs during review.
+- `POST connections/append-reviewed`: the same `connection` plus
+  `expectedRevision` from review. Returns `{ "id", "start": false }`.
+  Requires an unchanged configuration revision, rejects existing names (also
+  case-insensitively), and creates only a stopped connection with no mappings.
+  Existing sessions are not started, stopped or reapplied by this operation.
+
+These APIs reject unknown fields, inline credentials, embedded endpoint
+credentials and supplied start/mapping flags. A stale revision returns
+`409 CONFIG_CHANGED`; validation failure returns `400 VALIDATION_ERROR`.
+Both routes inherit the existing controller JWKS authorization boundary.
+Starting remains a separate action and requires credential values to have been
+provisioned. An older bridge without these endpoints must be updated; the UI
+must not fall back to the legacy `connections/create` upsert operation.
+
+This is a locally verified development candidate, not publication evidence.
+Full runtime snapshots and the existing editable create/update APIs retain their
+previous contracts. A network/write failure with an uncertain outcome requires
+refreshing saved connections before retrying.
+
+### Guided device setup (development candidate)
+
+The controller can export a portable version 1 `uns-openhub/opcua-device` recipe
+containing connection settings and signal definitions. Local endpoint, saved
+connection/mapping IDs, UNS destination and inline credentials are excluded.
+Supported local credential references remain unresolved in the artifact.
+
+`devices/preview-add` reviews `{ connection: { id, config }, mappings }` without
+opening a source connection or changing configuration. `devices/append-reviewed`
+requires the reviewed `expectedRevision` and adds only one **new stopped**
+connection plus 1–100 mappings for one UNS device. Duplicate names, IDs and
+UNS mapped attributes are rejected. The mutation is serialized, writes one atomic
+snapshot and removes the new stopped engine connection on mapping/write failure;
+existing sessions are not replayed. All routes retain controller JWKS protection.
+
+The guided UI chooses an existing active UNS Object ID and checks fresh attributes
+before review/create. Cancel leaves no partial connection. Create does not resolve
+credentials or start the device; provision local values and use explicit Start.
+This is a scoped additive setup contract, not a schema/package migration or a
+transaction guarantee across a process crash. Older bridges need an update.

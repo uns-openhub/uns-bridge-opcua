@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { runtimeSecretReferenceSchema } from "../runtime/local-secret-references.js";
 
 export const opcuaSecurityPolicyValues = [
   "None",
@@ -26,8 +27,8 @@ export const runtimeConnectionConfigSchema = z.object({
   userIdentity: z
     .object({
       type: z.enum(["anonymous", "username"]).optional(),
-      userName: z.string().min(1).optional(),
-      password: z.string().min(1).optional(),
+      userName: z.union([z.string().min(1), runtimeSecretReferenceSchema]).optional(),
+      password: z.union([z.string().min(1), runtimeSecretReferenceSchema]).optional(),
     })
     .optional(),
   subscription: z
@@ -60,6 +61,7 @@ export const runtimeMappingConfigSchema = z.object({
   objectId: z.string().min(1),
   attribute: z.string().min(1),
   attributeDescription: z.string().min(1).optional(),
+  uom: z.string().trim().min(1).max(128).regex(/^[^\u0000-\u001f\u007f]*$/).optional(),
   dataGroup: z.string().min(1).optional(),
   validityMode: z.enum(["interval", "lifecycle"]).optional(),
   lifecycleEndValue: z.string().min(1).optional(),

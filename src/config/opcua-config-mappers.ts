@@ -1,3 +1,4 @@
+import type { RuntimeCredential } from "../runtime/local-secret-references.js";
 import type { OpcuaConnectionConfig } from "../opcua/opcuaClientWrapper.js";
 import type { OpcuaMappingConfig } from "../opcua/subscriptionManager.js";
 import type { OpcuaSecurityPolicyName } from "./runtime-config.js";
@@ -11,8 +12,8 @@ export type RawOpcuaConnectionConfig = {
   userIdentity?:
     | {
         type?: "anonymous" | "username" | undefined;
-        userName?: string | undefined;
-        password?: string | undefined;
+        userName?: RuntimeCredential | undefined;
+        password?: RuntimeCredential | undefined;
       }
     | undefined;
   subscription?:
@@ -45,6 +46,7 @@ export type RawOpcuaMappingConfig = {
   objectId: string;
   attribute: string;
   attributeDescription?: string | undefined;
+  uom?: string | undefined;
   dataGroup?: string | undefined;
   validityMode?: "interval" | "lifecycle" | undefined;
   lifecycleEndValue?: string | undefined;
@@ -115,6 +117,7 @@ export const toMappingConfig = (input: RawOpcuaMappingConfig): OpcuaMappingConfi
   objectId: input.objectId,
   attribute: input.attribute,
   ...(input.attributeDescription ? { attributeDescription: input.attributeDescription } : {}),
+  ...(input.uom ? { uom: input.uom } : {}),
   ...(input.dataGroup ? { dataGroup: input.dataGroup } : {}),
   ...(input.validityMode ? { validityMode: input.validityMode } : {}),
   ...(input.lifecycleEndValue ? { lifecycleEndValue: input.lifecycleEndValue } : {}),

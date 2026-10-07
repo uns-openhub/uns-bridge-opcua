@@ -1,0 +1,318 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "version": {
+      "default": 1,
+      "type": "number",
+      "const": 1
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+    },
+    "connections": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "start": {
+            "type": "boolean"
+          },
+          "config": {
+            "type": "object",
+            "properties": {
+              "endpointUrl": {
+                "type": "string",
+                "minLength": 1
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "securityMode": {
+                "type": "string",
+                "enum": [
+                  "None",
+                  "Sign",
+                  "SignAndEncrypt"
+                ]
+              },
+              "securityPolicy": {
+                "type": "string",
+                "enum": [
+                  "None",
+                  "Basic128",
+                  "Basic128Rsa15",
+                  "Basic192",
+                  "Basic192Rsa15",
+                  "Basic256",
+                  "Basic256Rsa15",
+                  "Basic256Sha256",
+                  "Aes128_Sha256_RsaOaep",
+                  "Aes256_Sha256_RsaPss",
+                  "PubSub_Aes128_CTR",
+                  "PubSub_Aes256_CTR"
+                ]
+              },
+              "requestedSessionTimeoutMs": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "userIdentity": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "anonymous",
+                      "username"
+                    ]
+                  },
+                  "userName": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string",
+                            "const": "env"
+                          },
+                          "key": {
+                            "type": "string",
+                            "pattern": "^UNS_RUNTIME_SECRET_[A-Z][A-Z0-9_]{0,95}$"
+                          }
+                        },
+                        "required": [
+                          "provider",
+                          "key"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "password": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string",
+                            "const": "env"
+                          },
+                          "key": {
+                            "type": "string",
+                            "pattern": "^UNS_RUNTIME_SECRET_[A-Z][A-Z0-9_]{0,95}$"
+                          }
+                        },
+                        "required": [
+                          "provider",
+                          "key"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                }
+              },
+              "subscription": {
+                "type": "object",
+                "properties": {
+                  "requestedPublishingInterval": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "requestedLifetimeCount": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "requestedMaxKeepAliveCount": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "maxNotificationsPerPublish": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "publishingEnabled": {
+                    "type": "boolean"
+                  },
+                  "priority": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255
+                  }
+                }
+              },
+              "monitoring": {
+                "type": "object",
+                "properties": {
+                  "intervalMs": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "queueSize": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "discardOldest": {
+                    "type": "boolean"
+                  },
+                  "timestampsToReturn": {
+                    "type": "string",
+                    "enum": [
+                      "source",
+                      "server",
+                      "both",
+                      "neither"
+                    ]
+                  }
+                }
+              }
+            },
+            "required": [
+              "endpointUrl"
+            ]
+          },
+          "mappings": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "config": {
+                  "type": "object",
+                  "properties": {
+                    "nodeId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "topic": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "asset": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "assetDescription": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "objectType": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "objectTypeDescription": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "objectId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "attribute": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "attributeDescription": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uom": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+                    },
+                    "dataGroup": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "validityMode": {
+                      "type": "string",
+                      "enum": [
+                        "interval",
+                        "lifecycle"
+                      ]
+                    },
+                    "lifecycleEndValue": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "publishInitialValue": {
+                      "type": "boolean"
+                    },
+                    "mode": {
+                      "type": "string",
+                      "enum": [
+                        "subscription",
+                        "polling"
+                      ]
+                    },
+                    "expectedIntervalMs": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "intervalMs": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "queueSize": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "discardOldest": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "nodeId",
+                    "topic",
+                    "asset",
+                    "objectType",
+                    "objectId",
+                    "attribute"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "config"
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "config"
+        ]
+      }
+    }
+  }
+}

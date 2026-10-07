@@ -1,3 +1,4 @@
+import { resolveRuntimeIdentity, redactRuntimeIdentityError, type RuntimeIdentity } from "../runtime/local-secret-references.js";
 import { getLogger } from "@uns-kit/core";
 import {
   MessageSecurityMode,
@@ -19,11 +20,7 @@ export type OpcuaConnectionConfig = {
   securityMode?: "None" | "Sign" | "SignAndEncrypt";
   securityPolicy?: OpcuaSecurityPolicyName;
   requestedSessionTimeoutMs?: number;
-  userIdentity?: {
-    type?: "anonymous" | "username";
-    userName?: string;
-    password?: string;
-  };
+  userIdentity?: RuntimeIdentity;
   subscription?: {
     requestedPublishingInterval?: number;
     requestedLifetimeCount?: number;
@@ -73,6 +70,9 @@ export class OpcuaClientWrapper
   };
   private reconnectPromise: Promise<void> | undefined;
   private stopRequested = false;
+  private lastValueReceivedAt: string | undefined;
+  private lastGoodValueReceivedAt: string | undefined;
+  private lastValueQuality: string | undefined;
 
   private readonly subscriptions: SubscriptionManager;
 
@@ -98,6 +98,7 @@ export class OpcuaClientWrapper
       return;
     }
 
+    resolveRuntimeIdentity(this.config.userIdentity);
     this.stopRequested = false;
     this.setStatus("starting", false);
     this.client = OPCUAClient.create(this.createClientOptions());
@@ -121,7 +122,7 @@ export class OpcuaClientWrapper
         return;
       }
       this.setStatus("error", false, this.toMessage(error));
-      throw error;
+      throw new Error(this.toMessage(error));
     }
   }
 
@@ -156,11 +157,20 @@ export class OpcuaClientWrapper
   }
 
   async getStatus(): Promise<BridgeConnectionStatus> {
-    return this.status;
+    return { ...this.status, details: { ...this.status.details,
+      ...(this.lastValueReceivedAt ? { lastValueReceivedAt: this.lastValueReceivedAt } : {}),
+      ...(this.lastGoodValueReceivedAt ? { lastGoodValueReceivedAt: this.lastGoodValueReceivedAt } : {}),
+      ...(this.lastValueQuality ? { lastValueQuality: this.lastValueQuality } : {}),
+    } };
   }
 
   async addMapping(mapping: MappingDefinition<OpcuaMappingConfig>, onValue: (event: OpcuaValueEvent) => Promise<void>): Promise<void> {
-    await this.subscriptions.addMapping(mapping.id, mapping.config, onValue);
+    await this.subscriptions.addMapping(mapping.id, mapping.config, async event => {
+      this.lastValueReceivedAt = new Date().toISOString();
+      this.lastValueQuality = event.quality;
+      if (event.quality.startsWith("Good")) this.lastGoodValueReceivedAt = this.lastValueReceivedAt;
+      await onValue(event);
+    });
   }
 
   async updateMapping(mappingId: string, mapping: OpcuaMappingConfig): Promise<void> {
@@ -207,7 +217,9 @@ export class OpcuaClientWrapper
         return;
       }
 
-      void this.restoreAfterReconnect();
+      void this.restoreAfterReconnect().catch(error => {
+        this.setStatus("error", false, this.toMessage(error));
+      });
     });
 
     client.on("connection_failed", (error) => {
@@ -327,19 +339,7 @@ export class OpcuaClientWrapper
         userName: string;
         password: string;
       } {
-    if (!this.config.userIdentity || this.config.userIdentity.type === "anonymous") {
-      return undefined;
-    }
-
-    if (!this.config.userIdentity.userName || !this.config.userIdentity.password) {
-      throw new Error(`Connection '${this.id}' requires both userName and password for username authentication`);
-    }
-
-    return {
-      type: 1,
-      userName: this.config.userIdentity.userName,
-      password: this.config.userIdentity.password,
-    };
+    return resolveRuntimeIdentity(this.config.userIdentity);
   }
 
   private setStatus(
@@ -359,7 +359,7 @@ export class OpcuaClientWrapper
   }
 
   private toMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
+    return redactRuntimeIdentityError(error, this.config.userIdentity);
   }
 
   private async disconnectClient(client: OPCUAClient): Promise<void> {

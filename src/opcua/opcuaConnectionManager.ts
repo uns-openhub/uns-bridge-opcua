@@ -1,6 +1,10 @@
+import { resolveRuntimeIdentity, redactRuntimeIdentityError } from "../runtime/local-secret-references.js";
+import { BridgeValidationError } from "../api/validation-error.js";
+import { readEngineeringUnits, type EngineeringUnit } from "./engineering-units.js";
 import { getLogger } from "@uns-kit/core";
 import {
   AttributeIds,
+  DataType,
   BrowseDirection,
   MessageSecurityMode,
   NodeClass,
@@ -48,6 +52,7 @@ export class OpcuaConnectionManager {
   }
 
   async checkConnection(config: OpcuaConnectionConfig): Promise<void> {
+    resolveRuntimeIdentity(config.userIdentity);
     const client = OPCUAClient.create({
       clientName: `uns-bridge-opcua-health-check`,
       endpointMustExist: false,
@@ -65,14 +70,11 @@ export class OpcuaConnectionManager {
     try {
       await client.connect(config.endpointUrl);
       session = await client.createSession(
-        config.userIdentity?.type === "username" && config.userIdentity.userName && config.userIdentity.password
-          ? {
-              type: 1,
-              userName: config.userIdentity.userName,
-              password: config.userIdentity.password,
-            }
-          : undefined,
+        resolveRuntimeIdentity(config.userIdentity),
       );
+    } catch (error) {
+      if (error instanceof BridgeValidationError) throw error;
+      throw new Error(redactRuntimeIdentityError(error, config.userIdentity));
     } finally {
       if (session) {
         await session.close().catch(() => undefined);
@@ -98,6 +100,7 @@ export class OpcuaConnectionManager {
   }
 
   async browse(config: OpcuaConnectionConfig, nodeId = "ObjectsFolder"): Promise<unknown> {
+    resolveRuntimeIdentity(config.userIdentity);
     const client = OPCUAClient.create({
       clientName: `uns-bridge-opcua-browser`,
       endpointMustExist: false,
@@ -115,13 +118,7 @@ export class OpcuaConnectionManager {
     try {
       await client.connect(config.endpointUrl);
       session = await client.createSession(
-        config.userIdentity?.type === "username" && config.userIdentity.userName && config.userIdentity.password
-          ? {
-              type: 1,
-              userName: config.userIdentity.userName,
-              password: config.userIdentity.password,
-            }
-          : undefined,
+        resolveRuntimeIdentity(config.userIdentity),
       );
       if (!session) {
         throw new Error("Failed to create OPC UA session for browse");
@@ -154,6 +151,7 @@ export class OpcuaConnectionManager {
 
       const metadataValues = metadataReads.length > 0 ? await activeSession.read(metadataReads) : [];
       let metadataIndex = 0;
+      const units = await readEngineeringUnits(activeSession, references.filter(reference => reference.nodeClass === NodeClass.Variable).map(reference => reference.nodeId.toString()));
 
       const children = references.map((reference: ReferenceDescription) => {
         const item: {
@@ -166,6 +164,8 @@ export class OpcuaConnectionManager {
           isForward: boolean;
           hasChildren: boolean;
           dataTypeNodeId?: string | null;
+          dataType?: string | null;
+          engineeringUnits?: EngineeringUnit;
           valueRank?: unknown;
           accessLevel?: unknown;
           userAccessLevel?: unknown;
@@ -188,6 +188,10 @@ export class OpcuaConnectionManager {
 
         if (shouldReadVariableMetadata) {
           item.dataTypeNodeId = metadataValues[metadataIndex++]?.value.value?.toString() ?? null;
+          const builtIn = /^(?:ns=0;)?i=(\d+)$/.exec(item.dataTypeNodeId ?? "");
+          item.dataType = builtIn ? (DataType[Number(builtIn[1])] ?? item.dataTypeNodeId ?? null) : item.dataTypeNodeId ?? null;
+          const unit = units.get(item.nodeId);
+          if (unit) item.engineeringUnits = unit;
           item.valueRank = metadataValues[metadataIndex++]?.value.value ?? null;
           item.accessLevel = metadataValues[metadataIndex++]?.value.value ?? null;
           item.userAccessLevel = metadataValues[metadataIndex++]?.value.value ?? null;
@@ -202,6 +206,9 @@ export class OpcuaConnectionManager {
         continuationPoint: browseResult.continuationPoint?.toString("base64") ?? null,
         children,
       };
+    } catch (error) {
+      if (error instanceof BridgeValidationError) throw error;
+      throw new Error(redactRuntimeIdentityError(error, config.userIdentity));
     } finally {
       if (session) {
         await session.close().catch(() => undefined);

@@ -22,12 +22,30 @@ import { OpcuaAdapter } from "../opcua/opcua-adapter.js";
 import type { OpcuaConnectionConfig } from "../opcua/opcuaClientWrapper.js";
 import type { OpcuaMappingConfig, OpcuaValueEvent } from "../opcua/subscriptionManager.js";
 import { RuntimeConfigManager } from "../runtime/runtime-config-manager.js";
+import { BridgeValidationError, withValidationErrors } from "./validation-error.js";
+
+import { devicePreviewBodySchema, deviceAppendBodySchema } from "../runtime/reviewed-device.js";
+import { connectionPreviewBodySchema, connectionAppendBodySchema } from "../runtime/reviewed-connection.js";
 
 const SYSTEM_TOPIC = "system/bridge/opcua/";
 const SERVICE_ASSET = "runtime";
 const SERVICE_OBJECT_TYPE = "service";
 const EXPLORE_TAGS = ["Explore"];
 const OPCUA_SECURITY_POLICY_ENUM = [...opcuaSecurityPolicyValues];
+const runtimeCredentialApiSchema = {
+  oneOf: [
+    { type: "string" },
+    { type: "object", additionalProperties: false, required: ["provider", "key"], properties: {
+      provider: { type: "string", enum: ["env"] },
+      key: { type: "string", pattern: "^UNS_RUNTIME_SECRET_[A-Z][A-Z0-9_]{0,95}$" },
+    } },
+  ],
+};
+const runtimeIdentityApiSchema = {
+  type: "object", description: "Credentials or node-local environment references. References are retained in saved configuration; values are resolved only for a session.",
+  properties: { type: {type:"string",enum:["anonymous","username"]}, userName:runtimeCredentialApiSchema, password:runtimeCredentialApiSchema },
+};
+
 
 const runtimeConfigApplyExample = {
   version: 1,
@@ -84,6 +102,16 @@ const browseRequestExample = {
   nodeId: "ObjectsFolder",
 };
 
+function reviewedDeviceRequestBody(append: boolean) {
+  const body = append ? deviceAppendBodySchema : devicePreviewBodySchema;
+  return { required: true, schema: z.toJSONSchema(body, { unrepresentable: "any" }) };
+}
+
+function reviewedConnectionRequestBody(append: boolean) {
+  const body = append ? connectionAppendBodySchema : connectionPreviewBodySchema;
+  return { required: true, schema: z.toJSONSchema(body, { unrepresentable: "any" }) };
+}
+
 const connectionIdQuerySchema = z.object({
   id: z.string().min(1),
 });
@@ -91,6 +119,12 @@ const connectionIdQuerySchema = z.object({
 const discoveryQuerySchema = z.object({
   endpointUrl: z.string().min(1).optional(),
 });
+
+const mappingBatchBodySchema = z.object({
+  connectionId: z.string().min(1),
+  mappings: z.array(z.object({ id: z.string().min(1), config: runtimeMappingConfigSchema })).min(1).max(100),
+});
+const mappingAppendBodySchema = mappingBatchBodySchema.extend({ expectedRevision: z.string().regex(/^[a-f0-9]{64}$/) });
 
 const connectionCreateBodySchema = z.object({
   id: z.string().min(1),
@@ -205,6 +239,7 @@ function createConnectionCreateRequestBody(): NonNullable<IPostEndpointOptions["
           properties: {
             endpointUrl: { type: "string", example: "opc.tcp://localhost:4840" },
             securityMode: { type: "string", enum: ["None", "Sign", "SignAndEncrypt"], example: "None" },
+            userIdentity: runtimeIdentityApiSchema,
             securityPolicy: { type: "string", enum: OPCUA_SECURITY_POLICY_ENUM, example: "Basic256Sha256" },
             monitoring: {
               type: "object",
@@ -272,6 +307,7 @@ function createConnectionUpdateRequestBody(): NonNullable<IPostEndpointOptions["
           properties: {
             endpointUrl: { type: "string", example: "opc.tcp://localhost:4840" },
             securityMode: { type: "string", enum: ["None", "Sign", "SignAndEncrypt"], example: "None" },
+            userIdentity: runtimeIdentityApiSchema,
             securityPolicy: { type: "string", enum: OPCUA_SECURITY_POLICY_ENUM, example: "Basic256Sha256" },
             requestedSessionTimeoutMs: { type: "number", example: 60000 },
             monitoring: {
@@ -423,7 +459,7 @@ function upsertConnection(snapshot: RuntimeConfigSnapshot, body: ConnectionCreat
   if (index >= 0) {
     const existingConnection = nextConfig.connections[index];
     if (!existingConnection) {
-      throw new Error(`Connection '${body.id}' does not exist`);
+      throw new BridgeValidationError([{ path: ["id"], message: "Connection does not exist." }]);
     }
 
     nextConfig.connections[index] = {
@@ -447,12 +483,12 @@ function updateConnection(snapshot: RuntimeConfigSnapshot, body: ConnectionUpdat
   const index = nextConfig.connections.findIndex((connection) => connection.id === body.id);
 
   if (index < 0) {
-    throw new Error(`Connection '${body.id}' does not exist`);
+    throw new BridgeValidationError([{ path: ["id"], message: "Connection does not exist." }]);
   }
 
   const existingConnection = nextConfig.connections[index];
   if (!existingConnection) {
-    throw new Error(`Connection '${body.id}' does not exist`);
+    throw new BridgeValidationError([{ path: ["id"], message: "Connection does not exist." }]);
   }
 
   nextConfig.connections[index] = {
@@ -474,7 +510,7 @@ function startConnection(snapshot: RuntimeConfigSnapshot, body: ConnectionContro
   const nextConfig = cloneConfig(snapshot);
   const connection = nextConfig.connections.find((entry) => entry.id === body.id);
   if (!connection) {
-    throw new Error(`Connection '${body.id}' does not exist`);
+    throw new BridgeValidationError([{ path: ["id"], message: "Connection does not exist." }]);
   }
   connection.start = true;
   return nextConfig;
@@ -484,7 +520,7 @@ function stopConnection(snapshot: RuntimeConfigSnapshot, body: ConnectionControl
   const nextConfig = cloneConfig(snapshot);
   const connection = nextConfig.connections.find((entry) => entry.id === body.id);
   if (!connection) {
-    throw new Error(`Connection '${body.id}' does not exist`);
+    throw new BridgeValidationError([{ path: ["id"], message: "Connection does not exist." }]);
   }
   connection.start = false;
   return nextConfig;
@@ -494,7 +530,7 @@ function upsertMapping(snapshot: RuntimeConfigSnapshot, body: MappingCreateBody)
   const nextConfig = cloneConfig(snapshot);
   const connection = nextConfig.connections.find((entry) => entry.id === body.connectionId);
   if (!connection) {
-    throw new Error(`Connection '${body.connectionId}' does not exist`);
+    throw new BridgeValidationError([{ path: ["connectionId"], message: "Connection does not exist." }]);
   }
   const mappingIndex = connection.mappings.findIndex((mapping) => mapping.id === body.mapping.id);
   if (mappingIndex >= 0) {
@@ -509,11 +545,11 @@ function updateMapping(snapshot: RuntimeConfigSnapshot, body: MappingCreateBody)
   const nextConfig = cloneConfig(snapshot);
   const connection = nextConfig.connections.find((entry) => entry.id === body.connectionId);
   if (!connection) {
-    throw new Error(`Connection '${body.connectionId}' does not exist`);
+    throw new BridgeValidationError([{ path: ["connectionId"], message: "Connection does not exist." }]);
   }
   const mappingIndex = connection.mappings.findIndex((mapping) => mapping.id === body.mapping.id);
   if (mappingIndex < 0) {
-    throw new Error(`Mapping '${body.mapping.id}' does not exist on connection '${body.connectionId}'`);
+    throw new BridgeValidationError([{ path: ["mapping", "id"], message: "Mapping does not exist on this connection." }]);
   }
   connection.mappings[mappingIndex] = body.mapping;
   return nextConfig;
@@ -523,7 +559,7 @@ function deleteMapping(snapshot: RuntimeConfigSnapshot, body: MappingDeleteBody)
   const nextConfig = cloneConfig(snapshot);
   const connection = nextConfig.connections.find((entry) => entry.id === body.connectionId);
   if (!connection) {
-    throw new Error(`Connection '${body.connectionId}' does not exist`);
+    throw new BridgeValidationError([{ path: ["connectionId"], message: "Connection does not exist." }]);
   }
   connection.mappings = connection.mappings.filter((mapping) => mapping.id !== body.mappingId);
   return nextConfig;
@@ -591,8 +627,72 @@ export function createServiceApis(
     },
   });
 
-  return {
+  const serviceApis: Record<string, ServiceApiRegistration<BridgeServiceHandler>> = {
     ...managementServiceApis,
+    devicesPreviewAdd: defineServiceApi<BridgeServiceHandler>({
+      topic: SYSTEM_TOPIC, asset: SERVICE_ASSET, objectType: SERVICE_OBJECT_TYPE,
+      objectId: "devices", attribute: "preview-add", method: "POST", tags: ["Devices"],
+      description: "Review one new stopped connection and its device mappings without changing runtime state",
+      requestBody: reviewedDeviceRequestBody(false),
+      handler: async (event) => {
+        const input = parseBody(event, devicePreviewBodySchema);
+        event.res.json(await runtimeConfigManager.previewNewDevice(input));
+      },
+    }),
+    devicesAppendReviewed: defineServiceApi<BridgeServiceHandler>({
+      topic: SYSTEM_TOPIC, asset: SERVICE_ASSET, objectType: SERVICE_OBJECT_TYPE,
+      objectId: "devices", attribute: "append-reviewed", method: "POST", tags: ["Devices"],
+      description: "Persist a reviewed stopped device and all mappings together at an unchanged configuration revision",
+      requestBody: reviewedDeviceRequestBody(true),
+      handler: async (event) => {
+        const { expectedRevision, ...input } = parseBody(event, deviceAppendBodySchema);
+        event.res.json(await runtimeConfigManager.appendReviewedDevice(input, expectedRevision));
+      },
+    }),
+    connectionsPreviewAdd: defineServiceApi<BridgeServiceHandler>({
+      topic: SYSTEM_TOPIC, asset: SERVICE_ASSET, objectType: SERVICE_OBJECT_TYPE,
+      objectId: "connections", attribute: "preview-add", method: "POST",
+      description: "Review a new stopped connection with node-local credential references; no source connection is opened",
+      tags: ["Connections"],
+      requestBody: reviewedConnectionRequestBody(false),
+      handler: async (event) => {
+        const input = parseBody(event, connectionPreviewBodySchema);
+        event.res.json(await runtimeConfigManager.previewNewConnection(input.connection));
+      },
+    }),
+    connectionsAppendReviewed: defineServiceApi<BridgeServiceHandler>({
+      topic: SYSTEM_TOPIC, asset: SERVICE_ASSET, objectType: SERVICE_OBJECT_TYPE,
+      objectId: "connections", attribute: "append-reviewed", method: "POST",
+      description: "Add a reviewed stopped connection only if the configuration revision is unchanged; never replace an existing connection",
+      tags: ["Connections"],
+      requestBody: reviewedConnectionRequestBody(true),
+      handler: async (event) => {
+        const input = parseBody(event, connectionAppendBodySchema);
+        event.res.json(await runtimeConfigManager.appendReviewedConnection(input.connection, input.expectedRevision));
+      },
+    }),
+    mappingsPreview: defineServiceApi<BridgeServiceHandler>({
+      topic: SYSTEM_TOPIC, asset: SERVICE_ASSET, objectType: SERVICE_OBJECT_TYPE,
+      objectId: "mappings", attribute: "preview-batch", method: "POST",
+      description: "Review an additive mapping batch and capture the current configuration revision",
+      tags: ["Mappings"],
+      requestBody: { required: true, contentType: "application/json", schemas: [defineDataCatalogSchema({ id: "mapping-batch", title: "Mapping batch", contentType: "application/json", fields: [defineDataCatalogField("connectionId", "string", "Target connection"), defineDataCatalogField("mappings", "array", "New mapping entries (1 to 100)")] })] },
+      handler: async (event) => {
+        const input = parseBody(event, mappingBatchBodySchema);
+        event.res.json(await runtimeConfigManager.previewMappingsBatch(input.connectionId, input.mappings));
+      },
+    }),
+    mappingsAppend: defineServiceApi<BridgeServiceHandler>({
+      topic: SYSTEM_TOPIC, asset: SERVICE_ASSET, objectType: SERVICE_OBJECT_TYPE,
+      objectId: "mappings", attribute: "append-batch", method: "POST",
+      description: "Add reviewed mappings without replacing existing entries; reject a stale configuration revision",
+      tags: ["Mappings"],
+      requestBody: { required: true, contentType: "application/json", schemas: [defineDataCatalogSchema({ id: "mapping-append-batch", title: "Reviewed mapping batch", contentType: "application/json", fields: [defineDataCatalogField("connectionId", "string", "Target connection"), defineDataCatalogField("mappings", "array", "New mapping entries (1 to 100)"), defineDataCatalogField("expectedRevision", "string", "Revision returned by preview-batch")] })] },
+      handler: async (event) => {
+        const input = parseBody(event, mappingAppendBodySchema);
+        event.res.json(await runtimeConfigManager.appendMappingsBatch(input.connectionId, input.mappings, input.expectedRevision));
+      },
+    }),
     discoveryServers: defineServiceApi<BridgeServiceHandler>({
       topic: SYSTEM_TOPIC,
       asset: SERVICE_ASSET,
@@ -633,4 +733,7 @@ export function createServiceApis(
       },
     }),
   };
+  return Object.fromEntries(Object.entries(serviceApis).map(([key, registration]) => [
+    key, { ...registration, handler: withValidationErrors(registration.handler) },
+  ]));
 }

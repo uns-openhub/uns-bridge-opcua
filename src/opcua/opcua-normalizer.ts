@@ -27,6 +27,7 @@ export const opcuaNormalizer: ValueEventNormalizer<OpcuaMappingConfig, OpcuaValu
           ? event.value
           : JSON.stringify(event.value),
       dataGroup: mapping.dataGroup ?? connectionId,
+      ...(mapping.uom || event.uom ? { uom: mapping.uom || event.uom } : {}),
     },
   };
 
