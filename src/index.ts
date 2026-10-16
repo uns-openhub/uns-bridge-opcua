@@ -1,4 +1,4 @@
-import { ConfigFile, UnsProxyProcess, getLogger, type IApiProxyOptions } from "@uns-kit/core";
+import { ConfigFile, UnsProxyProcess, getLogger, mqttChannelParameters, resolveMqttChannel, type MqttChannelConfig, type IApiProxyOptions } from "@uns-kit/core";
 import "@uns-kit/api";
 import { buildUnsRoutePath } from "@uns-kit/core/uns/uns-path.js";
 import { registerApiCatalog, type UnsApiProxy, type UnsProxyProcessWithApi } from "@uns-kit/api";
@@ -21,20 +21,20 @@ const bridgeSettings = bridgeSettingsSchema.parse(config.bridge);
 const instanceMode = config.uns.instanceMode ?? "wait";
 const handover = config.uns.handover ?? true;
 
-const processHost = config.infra.host ?? config.output?.host;
-if (!processHost) {
-  throw new Error("infra.host or output.host must be configured");
-}
+const infraChannel = resolveMqttChannel(config.infra as MqttChannelConfig, (config.infra.host || config.infra.hosts?.length || config.infra.servers?.length) ? undefined : config.output as MqttChannelConfig | undefined);
+const outputChannel = resolveMqttChannel(infraChannel, config.output as MqttChannelConfig | undefined);
 
-const unsProxyProcess = new UnsProxyProcess(processHost, {
+const unsProxyProcess = new UnsProxyProcess(infraChannel.host, {
+  ...mqttChannelParameters(infraChannel),
   processName: config.uns.processName,
 }) as UnsProxyProcessWithApi;
 
 const publisherProxy = await unsProxyProcess.createUnsMqttProxy(
-  config.output?.host ?? processHost,
+  outputChannel.host,
   bridgeSettings.publisher.instanceName,
   instanceMode,
   handover,
+  mqttChannelParameters(outputChannel),
 );
 
 const managedPublisher = new ManagedBridgePublisher(
