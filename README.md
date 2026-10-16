@@ -31,6 +31,11 @@ deployment configuration. The bridge does not log in with an email/password or
 service token: its management API verifies the operator's JWT using the
 configured controller JWKS endpoints.
 
+`infra` supplies the full MQTT connection (port, authentication, TLS and failover servers).
+`output` can override individual connection settings for published measurements;
+omitted output settings inherit from `infra`. Without a port override, plain MQTT
+uses 1883. Management registration uses the infrastructure connection.
+
 Runtime bridge state is loaded from `runtime-config.json` when present. A sample snapshot is provided in `runtime-config.json.example`.
 This runtime snapshot is separate from the original `uns-kit` `config.json` structure (`uns`, `infra`, `input`, `output`, ...).
 If needed, override the snapshot path with `UNS_BRIDGE_RUNTIME_CONFIG_PATH`.

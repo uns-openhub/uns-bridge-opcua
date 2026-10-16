@@ -1,10 +1,10 @@
 {
   "name": "uns-bridge-opcua",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "private": true,
   "description": "UNS OpenHub add-on for browsing OPC UA servers and mapping nodes into UNS.",
   "license": "MIT",
-  "author": "Aljo\u0161a Vister",
+  "author": "Aljoša Vister",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/uns-openhub/uns-bridge-opcua.git"
