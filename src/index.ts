@@ -1,7 +1,8 @@
+import { registerManagementApiCatalog as registerApiCatalog } from './management-api-catalog.js';
 import { ConfigFile, UnsProxyProcess, getLogger, mqttChannelParameters, resolveMqttChannel, type MqttChannelConfig, type IApiProxyOptions } from "@uns-kit/core";
 import "@uns-kit/api";
 import { buildUnsRoutePath } from "@uns-kit/core/uns/uns-path.js";
-import { registerApiCatalog, type UnsApiProxy, type UnsProxyProcessWithApi } from "@uns-kit/api";
+import { type UnsApiProxy, type UnsProxyProcessWithApi } from "@uns-kit/api";
 import { bridgeSettingsSchema, BridgeEngine, ManagedBridgePublisher } from "@uns-kit/bridge-core";
 import { createServiceApis } from "./api/routes.js";
 import { OpcuaAdapter } from "./opcua/opcua-adapter.js";
